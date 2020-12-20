@@ -103,6 +103,10 @@ KEY_KP_8 =      0xFFB8
 KEY_KP_9 =      0xFFB9
 KEY_KP_Enter =  0xFF8D
 
+def get_int(block, pos):
+    return bytearray(block)[pos]
+
+
 class RFBClient(Protocol):
     
     def __init__(self):
@@ -116,7 +120,8 @@ class RFBClient(Protocol):
     #------------------------------------------------------
 
     def _handleInitial(self):
-        buffer = ''.join(self._packet)
+        print(self._packet)
+        buffer = ''.join([i.decode('ascii') for i in self._packet])
         if '\n' in buffer:
             if buffer[:3] == 'RFB':
                 #~ print "rfb"
@@ -126,7 +131,7 @@ class RFBClient(Protocol):
                     log.msg("wrong protocol version\n")
                     self.transport.loseConnection()
             buffer = buffer[12:]
-            self.transport.write('RFB 003.003\n')
+            self.transport.write('RFB 003.003\n'.encode('ascii'))
             log.msg("connected\n")
             self._packet[:] = [buffer]
             self._packet_len = len(buffer)
@@ -364,6 +369,7 @@ class RFBClient(Protocol):
     def _handleDecodeHextileSubrect(self, block, subencoding, bg, color, x, y, width, height, tx, ty, tw, th):
         subrects = 0
         pos = 0
+        self.bypp = int(self.bypp)
         if subencoding & 2:     #BackgroundSpecified
             bg = block[:self.bypp]
             pos += self.bypp
@@ -373,7 +379,7 @@ class RFBClient(Protocol):
             pos += self.bypp
         if subencoding & 8:     #AnySubrects
             #~ (subrects, ) = unpack("!B", block)
-            subrects = ord(block[pos])
+            subrects = get_int(block, pos)
         #~ print subrects
         if subrects:
             if subencoding & 16:    #SubrectsColoured
@@ -397,8 +403,8 @@ class RFBClient(Protocol):
         while pos < end:
             pos2 = pos + self.bypp
             color = block[pos:pos2]
-            xy = ord(block[pos2])
-            wh = ord(block[pos2+1])
+            xy = get_int(block, pos2)
+            wh = get_int(block, pos2+1)
             sx = xy >> 4
             sy = xy & 0xf
             sw = (wh >> 4) + 1
@@ -412,8 +418,8 @@ class RFBClient(Protocol):
         pos = 0
         end = len(block)
         while pos < end:
-            xy = ord(block[pos])
-            wh = ord(block[pos+1])
+            xy = get_int(block, pos)
+            wh = get_int(block, pos+1)
             sx = xy >> 4
             sy = xy & 0xf
             sw = (wh >> 4) + 1
@@ -442,18 +448,21 @@ class RFBClient(Protocol):
     # incomming data redirector
     #------------------------------------------------------
     def dataReceived(self, data):
-        #~ sys.stdout.write(repr(data) + '\n')
-        #~ print len(data), ", ", len(self._packet)
+        sys.stdout.write(repr(data) + '\n')
+        print(len(data), ", ", len(self._packet))
         self._packet.append(data)
         self._packet_len += len(data)
         self._handler()
 
     def _handleExpected(self):
         if self._packet_len >= self._expected_len:
-            buffer = ''.join(self._packet)
+            packet = [(i if i else b'') for i in self._packet]
+            buffer = b''.join(packet)
+            
             while len(buffer) >= self._expected_len:
                 self._already_expecting = 1
-                block, buffer = buffer[:self._expected_len], buffer[self._expected_len:]
+                length = int(self._expected_len)
+                block, buffer = buffer[:length], buffer[length:]
                 #~ log.msg("handle %r with %r\n" % (block, self._expected_handler.__name__))
                 self._expected_handler(block, *self._expected_args, **self._expected_kwargs)
             self._packet[:] = [buffer]
@@ -601,25 +610,25 @@ if __name__ == '__main__':
     class RFBTest(RFBClient):
         """dummy client"""
         def vncConnectionMade(self):
-            print "Screen format: depth=%d bytes_per_pixel=%r" % (self.depth, self.bpp)
-            print "Desktop name: %r" % self.name
+            print("Screen format: depth=%d bytes_per_pixel=%r" % (self.depth, self.bpp))
+            print("Desktop name: %r" % self.name)
             self.SetEncodings([RAW_ENCODING])
             self.FramebufferUpdateRequest()
         
         def updateRectangle(self, x, y, width, height, data):
-            print "%s " * 5 % (x, y, width, height, repr(data[:20]))
+            print("%s " * 5 % (x, y, width, height, repr(data[:20])))
     
     class RFBTestFactory(protocol.ClientFactory):
         """test factory"""
         protocol = RFBTest
         def clientConnectionLost(self, connector, reason):
-            print reason
+            print(reason)
             from twisted.internet import reactor
             reactor.stop()
             #~ connector.connect()
     
         def clientConnectionFailed(self, connector, reason):
-            print "connection failed:", reason
+            print("connection failed:", reason)
             from twisted.internet import reactor
             reactor.stop()
 
@@ -634,10 +643,10 @@ if __name__ == '__main__':
     o = Options()
     try:
         o.parseOptions()
-    except usage.UsageError, errortext:
-        print "%s: %s" % (sys.argv[0], errortext)
-        print "%s: Try --help for usage details." % (sys.argv[0])
-        raise SystemExit, 1
+    except (usage.UsageError, errortext):
+        print("%s: %s" % (sys.argv[0], errortext))
+        print("%s: Try --help for usage details." % (sys.argv[0]))
+        raise (SystemExit, 1)
 
     logFile = sys.stdout
     if o.opts['outfile']:
